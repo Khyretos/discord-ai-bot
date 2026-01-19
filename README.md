@@ -50,11 +50,9 @@ version: "3"
 
 services:
   discord-ai-bot:
-  container-name: discord-ai-bot
-  restart: unless-stopped
-  build: .
-  volumes:
-    - ./app:/app
-  env_file:
-    - .env
+    container_name: discord-ai-bot
+    restart: unless-stopped
+    build: .
+    env_file:
+      - .env
 ```

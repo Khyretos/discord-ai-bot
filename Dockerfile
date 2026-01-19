@@ -14,7 +14,10 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir discord.py python-dotenv requests asyncio
 
 # Copy the bot script
-COPY /scripts/bot.py .
+COPY /scripts/bot.py /app
+
+# Copy the env files
+COPY ./env /app
 
 # Run the bot on container start
 CMD ["python", "bot.py"]
