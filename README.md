@@ -46,20 +46,15 @@ docker-compose up --build
 ##### Docker Compose Example (`docker-compose.yml`)
 
 ```yaml
-version: "3.8"
+version: "3"
 
 services:
-  bot:
-    build: .
-    volumes:
-      - .:/app
-    env_file:
-      - .env
-    depends_on:
-      - openwebui
-
-  openwebui:
-    image: openwebai/openwebui:latest
-    ports:
-      - "5000:5000"
+  discord-ai-bot:
+  container-name: discord-ai-bot
+  restart: unless-stopped
+  build: .
+  volumes:
+    - ./app:/app
+  env_file:
+    - .env
 ```
