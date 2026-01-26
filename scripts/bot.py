@@ -1,3 +1,14 @@
+"""
+This file contains the implementation of a Discord bot that can generate text and images based on user input using OpenWebUI API.
+The bot has commands to ask questions, get the name of the currently loaded language model, and generate images based on prompts.
+The bot's functionality is provided through a Discord bot using the discord and discord.app_commands libraries.
+The bot fetches chat history, removes mentions and bot messages, and sends responses based on user commands.
+The responses can be text or images, depending on the user's input and the bot's configuration.
+The bot also handles events such as ready, disconnect, and resume to maintain its connection and respond to user messages.
+The implementation utilizes classes, methods, and tools to handle text and image processing, including the chat request and response functions.
+Error handling and logging are implemented to ensure efficient and reliable operation of the bot.
+"""
+
 import base64
 import json
 import logging
@@ -5,6 +16,7 @@ import os
 import re
 from io import BytesIO
 
+import aiohttp
 import discord
 import requests
 from discord import app_commands
@@ -22,6 +34,7 @@ OPENWEBUI_API_BASE = os.getenv("OPENWEBUI_API_BASE")
 MODEL_NAME = os.getenv("MODEL_NAME")
 
 # Initialize logger
+# TODO: define more logging types
 logger = logging.getLogger("discord.gateway")
 logging.getLogger("discord").setLevel(logging.WARNING)
 logging.getLogger("aiohttp.client").setLevel(logging.ERROR)
@@ -116,7 +129,7 @@ def part_string(current_part: int, amount_of_parts: int) -> str:
 
 
 async def show_generated_awnser(
-    interaction,
+    interaction: discord.Interaction,
     title: str,
     awnser_list: list[str],
     think_list: list[str],
@@ -173,10 +186,10 @@ async def show_generated_awnser(
 
         return emb, n
 
-    await Pagination(interaction, get_page, generate_chat_response).navegate()
+    await Pagination(interaction, get_page, generate_chat_response, logger).navegate()
 
 
-def split_string_into_chunks(input_string: str, max_chunk_size: int):
+def split_string_into_chunks(input_string: str, max_chunk_size: int) -> list[str]:
     """
     Splits a string into chunks of specified size.
 
@@ -217,7 +230,7 @@ def extract_thought_and_awnser(input_string):
     return result
 
 
-async def chat_request(prompt):
+async def chat_request(prompt: str) -> list[str]:
     """
     Sends a chat request to the OpenWebUI API with the given prompt.
 
@@ -227,38 +240,42 @@ async def chat_request(prompt):
     Returns:
         response (Response): The response from the OpenWebUI API.
     """
+    response: aiohttp.ClientResponse = None
+
     headers = {
         "Authorization": f"Bearer {OPENWEBUI_API_KEY}",
         "Content-Type": "application/json",
     }
 
-    body = json.dumps(
-        {
-            "chat_id": "4a299940-11b4-49e7-9844-5c39e2a2955c",
-            "stream": False,
-            "model": MODEL_NAME,
-            "messages": [{"role": "user", "content": prompt}],
-            "features": {
-                "image_generation": False,
-                "code_interpreter": False,
-                "voice": False,
-                "web_search": True,
-            },
-            "background_tasks": {"title_generation": True},
-        }
-    )
+    body = {
+        "chat_id": "4a299940-11b4-49e7-9844-5c39e2a2955c",
+        "stream": False,
+        "model": MODEL_NAME,
+        "messages": [{"role": "user", "content": prompt}],
+        "features": {
+            "image_generation": False,
+            "code_interpreter": False,
+            "voice": False,
+            "web_search": True,
+        },
+        "background_tasks": {"title_generation": True},
+    }
 
-    response = requests.post(
-        OPENWEBUI_API_BASE + "/api/chat/completions",
-        data=body,
-        headers=headers,
-        timeout=600,
-    )
+    url: str = OPENWEBUI_API_BASE + "/api/chat/completions"
+    timeout = aiohttp.ClientTimeout(total=600)
 
-    return response
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(url, json=body, headers=headers) as response:
+            logger.info(f"Status: {response.status}")
+            if not response.status == 200:
+                logger.info(f"Failed to get response, Error message: {response}")
+                return None
+            response_data = await response.json()
+            logger.info(f"Resonse body: {response}")
+            return response_data
 
 
-async def generate_chat_response(interaction, prompt):
+async def generate_chat_response(interaction: discord.Interaction, prompt):
     """
     Generates a chat response based on the given prompt.
 
@@ -269,36 +286,35 @@ async def generate_chat_response(interaction, prompt):
     Returns:
         discord.Embed: The embed object containing the chat response.
     """
+
     await interaction.response.defer()
-    response = await chat_request(prompt)
-    embed = discord.Embed()
+
+    print(f"original response: {interaction.original_response}")
+
+    response: json = await chat_request(prompt)
+    embed = discord.Embed(title="test", description="")
 
     thought_list: list[str] = []
     awnser_list: list[str] = []
     formatted_sources: str = ""
 
-    if response.status_code != 200:
-        embed.title(f"Request failed with status code {response.status_code}")
-        print(embed.title)
-        embed.description("Error message:", response.text)
-        print(embed.description)
-        embed.color = 0xFF0000
-        return embed
+    # embed.title("Request failed with status code ")
 
-    # Convert json into dictionary
-    response_dict = response.json()
+    if not response:
+        embed.title = "Failed to get response"
+        embed.color = 0xFF0000
+        await interaction.response.edit_original_response(embed=embed)
 
     # Print response in console (just in case)
-    print(json.dumps(response_dict, indent=4))
-
+    logger.info(json.dumps(response, indent=4))
     # Default values
     title = "Answer"
     embed.color = 0xFF0000
 
     # Check if "sources" exists and is valid
-    if "sources" in response_dict and response_dict["sources"]:
+    if "sources" in response and response["sources"]:
         try:
-            title = response_dict["sources"][0]["source"]["name"]
+            title = response["sources"][0]["source"]["name"][:256]
             embed.color = 0x00AEEF
         except (KeyError, IndexError, TypeError):
             pass  # Keep defaults if nested fields are missing
@@ -306,7 +322,7 @@ async def generate_chat_response(interaction, prompt):
     # Always set the embed fields safely
     try:
         result: list[str] = extract_thought_and_awnser(
-            response_dict["choices"][0]["message"]["content"]
+            response["choices"][0]["message"]["content"]
         )
 
         if not is_empty_or_null(result[1]):
@@ -323,7 +339,7 @@ async def generate_chat_response(interaction, prompt):
 
     try:
         # Parse the response and get the metadata (the sources of the generated awnser)
-        metadata = response_dict["sources"][0]["metadata"]
+        metadata = response["sources"][0]["metadata"]
         formatted_sources = "\n".join(
             [
                 f"[{item['title']}]({item['source']})"
@@ -362,8 +378,7 @@ async def download_image(download_endpoint):
     )
 
     if response.status_code != 200:
-        print(f"Request failed with status code {response.status_code}")
-        print("Error message:", response.text)
+        logger.error(f"Failed to get response, Error message: {response}")
         return None
 
     image_data = BytesIO(response.content)
@@ -404,15 +419,15 @@ async def generate_image_response(prompt):
     embed = discord.Embed()
 
     if response.status_code != 200:
+        logger.error(f"Request failed with status code {response.status_code}")
+        logger.error(f"Error message:{response.text}")
         embed.title = f"Request failed with status code {response.status_code}"
-        print(embed.title)
         embed.description = "Error message:", response.text
-        print(embed.description)
         return embed
 
     response_dict = response.json()
 
-    print(json.dumps(response_dict, indent=4))
+    logger.info(json.dumps(response_dict, indent=4))
 
     # Parse image URL correctly
     try:
@@ -453,12 +468,20 @@ async def generate_image_response(prompt):
 #     await interaction.followup.send(embed=reply, file=img_file)
 
 
-# QUESTION COMMAND
 @bot.tree.command(name="question", description="Ask a question and get a text reply")
 @app_commands.describe(prompt="What is your question?")
 async def question_cmd(interaction: discord.Interaction, prompt: str):
-    """The command that is used to generate a text response based on a question"""
+    """
+    Command to generate a text response based on a user's question.
 
+    Args:
+        interaction (discord.Interaction): The interaction object representing the user's command.
+        prompt (str): The question asked by the user.
+
+    Returns:
+        None
+    """
+    logger.info(f"Started Question command with the following prompt: {prompt}")
     await generate_chat_response(interaction, prompt)
 
 
@@ -565,8 +588,8 @@ async def on_ready():
     Syncs the bot's slash commands to the guild and prints the number of commands synced.
     """
     synced = await bot.tree.sync()
-    print(f"Slash commands synced to guild. Commands: {len(synced)}")
-    print(f"Logged in as {bot.user}")
+    logger.info(f"Slash commands synced to guild. Commands: {len(synced)}")
+    logger.info(f"Logged in as {bot.user}")
 
 
 @bot.event
@@ -589,7 +612,7 @@ async def on_resumed():
 def main():
     """Main function to run the AI bot."""
     if not all([DISCORD_TOKEN, OPENWEBUI_API_KEY, OPENWEBUI_API_BASE, MODEL_NAME]):
-        print("Error: Missing required environment variables")
+        logger.info("Error: Missing required environment variables")
         return
 
     bot.run(DISCORD_TOKEN)
