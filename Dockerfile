@@ -19,5 +19,12 @@ COPY /scripts/bot.py /app
 # Copy the env files
 COPY ./env /app
 
+# Define environment variables
+ENV DISCORD_TOKEN = ${DISCORD_TOKEN}
+ENV OPENWEBUI_API_KEY = ${OPENWEBUI_API_KEY}
+ENV OPENWEBUI_API_BASE = ${OPENWEBUI_API_BASE}
+ENV MODEL_NAME = ${MODEL_NAME}
+
+
 # Run the bot on container start
 CMD ["python", "bot.py"]
