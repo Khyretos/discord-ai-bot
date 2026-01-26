@@ -15,9 +15,7 @@ RUN pip install --no-cache-dir discord.py python-dotenv requests asyncio
 
 # Copy the bot script
 COPY /scripts/bot.py /app
-
-# Copy the env files
-COPY ./env /app
+COPY /scripts/pagination.py /app
 
 # Define environment variables
 ENV DISCORD_TOKEN = ${DISCORD_TOKEN}
